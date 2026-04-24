@@ -1,38 +1,9 @@
 import requests
 import discord
+from functions import json_rpc, getinfo, format_hashrate
+from config import BOT_TOKEN
 from discord.ext import commands
-import json
 
-BOT_TOKEN = "YOU_TOKEN"
-API_URL = "http://138.124.183.11:21698"
-
-def getinfo():
-    try:
-        response = requests.get(API_URL + "/getinfo")
-        response.raise_for_status()
-        data = response.json()
-        return data
-    except requests.exceptions.RequestException as e:
-        return {"error": str(e)}
-
-# ------------------ JSON-RPC ------------------ #
-def json_rpc(method, params=None, id=1):
-    headers = {'Content-Type': 'application/json'}
-    payload = {
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params if params else {},
-        "id": id
-    }
-    try:
-        response = requests.post(f"{API_URL}/json_rpc", headers=headers, data=json.dumps(payload))
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f"Error in the request: {e}")
-        return None
-
-# ------------------ Commands ------------------ #
 
 @commands.command(name="help")
 async def help_command(ctx):
@@ -66,7 +37,7 @@ async def info_command(ctx):
 	        f"  - **[Zent Cash Wallet Electronic](https://github.com/ZentCashFoundation/zentcash-wallet-electronic/releases/tag/v0.3.15)**\n"
 	        f"  - **[Zent Cash Mobile for Android](https://play.google.com/store/apps/details?id=cash.zent.mobileapp)**\n"
 	        f" * **[Paper Wallet](https://zentcashfoundation.github.io/zentcash-paper-wallet)**\n"
-            f" * **[Pools](https://miningpoolstats.stream/zentcash/)**\n"
+            f" * **[Pools](https://miningpoolstats.stream/zentcash)**\n"
             f" * **[Explorer](https://explorer.zent.cash/)**\n"
             f" * **[GitHub](https://github.com/ZentCashFoundation)**\n"
             f" * **Social:** \n"
@@ -119,6 +90,7 @@ async def network_command(ctx):
         total_coins = round(float(total_coins), 2)
         minimum_fee = round(float(minimum_fee) / 10**2, 2)
         alreadyGeneratedCoins = round(float(alreadyGeneratedCoins) / 10**2, 2)
+        hashrate = format_hashrate(hashrate)
     except (ValueError, TypeError):
         reward = "N/A"
         total_coins = "N/A"
@@ -149,38 +121,60 @@ async def network_command(ctx):
     await ctx.send(embed=embed)
 
 @commands.command(name="price")
-async def price(ctx, pair: str = "ZTC_BTC"):
+async def price_command(ctx, pair: str = "ZTC_BTC"):
 
-    base_url = "https://xapi.finexbox.com/v3/orderbook?ticker_id="
-    api_url = f"{base_url}{pair}"
-
-    base, target = pair.split("_")
+    base_url = "https://api.games.zent.cash:3000/api/exchange/market/ticker"
+    api_url = f"{base_url}?pair={pair}"
 
     try:
         response = requests.get(api_url)
         response.raise_for_status()
         data = response.json()
 
-        last_price = data["asks"][0].get('price', 'N/A')
-        high_price = data["bids"][1].get('price', 'N/A')
-        low_price = data["asks"][0].get('price', 'N/A')
-        target_currency = target
+        result = data.get("result", {})
 
-        if last_price != 'N/A':
+        last_price = result.get('last_price')
+        ask_price = result.get('ask_price')
+        bid_price = result.get('bid_price')
+        spread = result.get('spread')
 
-            message = (
-                f"📊 **Price for {pair.upper()}**\n\n"
-                f"Last: {last_price} {target_currency}\n"
-                f"Hight: {high_price} {target_currency}\n"
-                f"Low: {low_price} {target_currency}\n\n"
-                f"🔍 _Data obtained directly from the Finexbox Exchange._"
-            )
+        try:
+            last_price = float(last_price)
+            ask_price = float(ask_price)
+            bid_price = float(bid_price)
+            spread = float(spread)
+        except (TypeError, ValueError):
+            last_price = ask_price = bid_price = spread = None
+
+        if ask_price and ask_price != 0 and spread is not None:
+            marginspread = (spread * 100) / ask_price
         else:
-            message = f"⚠️ No data found for the pair {pair.upper()}."
+            marginspread = None
+
+        pairformat1, pairformat2 = pair.split("_")
+
+        if last_price is not None:
+            message = (
+                f"📊 **Price for {pairformat1}/{pairformat2}**\n\n"
+                f"Last: {last_price:.12f}\n"
+                f"Hight: {ask_price:.12f}\n"
+                f"Low: {bid_price:.12f}\n"
+                f"Spread: {spread:.12f}"
+            )
+
+            if marginspread is not None:
+                message += f" ({marginspread:.2f}%)"
+
+            message += "\n\n🔍 _Data obtained directly from the **Zent Cash Fun**._"
+
+        else:
+            message = f"⚠️ No data found for pair {pair.upper()}."
+
     except requests.exceptions.RequestException as e:
-        message = f"⚠️ Error getting data: {e}"
+        message = f"⚠️ Error obtaining data: {e}"
 
     await ctx.send(message)
+
 
 @commands.command(name="donate")
 async def donate_command(ctx):
@@ -192,16 +186,9 @@ async def donate_command(ctx):
             f" **DOGE:** D9M7Ef8G134iLeLP5cigvMNZ63gBZGAFJW\n\n"
 	        f" **ETH:** 0xA16e6d3191B7EE5819Ea9d67e7d476f8881eB793\n\n"
 	        f" **XUNI:** Xuniiirs6Vo8REdUmDf2vXM9PjnWZe6PfToy2sBkLCD1Hn5Dp2CN6G8JTpAMNUV5kB93zqi3GGv3SYPfok39xE7BJkSk74jUsBU\n\n"
-            f" **SUMO:** Sumoo75pwmGRHjhnAhQNx8Kx1xvcFQmePQjNxgz9gnbz7g32nV3chjy6Jo8TJW7y7tAPweHhzYqiGVHRm3VYZ7LHa7o8VqCBRYn\n\n"
-            f" **MNG:** M7PRNxYRv5a6hcKpVMZsvj8H1xJenRWAkPKWmJv6NkHZiUH8zTf5DrXZpSmHeabNzsZYnjv2PxpVMdRUBhK1EPJrTGEc3TG\n\n"
-            f" **MSR:** 5mWL5DSvUBaFvgMr6SGPSf9J37dLxzqtXCJyUo75ufwQdRwBkvtnu9oiCDQYg5YXGhD5xyKZ5nrewgwgVdTB8dcRJ82wHin\n\n"
             f" **XMR:** 42ooMsRFikjAJiB7yq4aRtBbtZMmNX3LuB9X8LFsD3edRnaCrvSSnG1b2f29SZggddSWMuuyLtNZZLFaYU3CYiSW6vVQq96\n\n"
-            f" **TLO:** TA2zqa6Leng4XT11ND2mBT48ut92kNG7GLuyxgZGMrc2KoC2hE2G42EhY9EgXo3oMH61G3DC1FkBAHPUgq6txTkF1ZjRHKom6\n\n"
-            f" **RTO:** AEWhnFwb2YxfesikimGTeaTN9EeoX6nW6KdMN8FmLMGhcpxP55JE1oSKqKVhs6jbwdSThHu5hNUj6fhdyQ6gsQs63sFp9cM\n\n"
             f" **XKR:** SEKReVwkp6DGx92JKtBT8yaBXR7iQmeWqcLBw8jcSWCTDShM8R5BZwLUveL917t47ohyFhj8NbG2QGAexqyAy3HkLPXP5kPxVXc\n\n"
-            f" **XTCASH:** cashHuRhTQx61qMRCNmxXcTjceTU18KFP33P68xJbz2k691vZsUannBFkqzoNR1Jc7VYDG2W4tfiBfWU8646LVN29qjpR1u6oZ\n\n"
             f" **ZTC:** Ze3iyuhaF8S3FxWgX3nqXodakwxqNzzgXgz4xGezWHPfRt3CsFDeV7EccVykYByuVeTnxTbwUh4CeBM21ftZKMn82QHzRSDe9\n\n"
-            f" **CIRQ:** cirqgDYRTQsfF7okKJ6DgEZXay258cqtPYnACF4rCLFgZ2z9skJhis5NqFQfyT25CrAwSMUWMpM12ehu9RtR3gRjWhjhbJkL1kM\n\n"
         ),
         color=0x5A9EC9
     )
@@ -216,6 +203,6 @@ bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 bot.add_command(help_command)
 bot.add_command(info_command)
 bot.add_command(network_command)
-bot.add_command(price)
+bot.add_command(price_command)
 bot.add_command(donate_command)
 bot.run(BOT_TOKEN)

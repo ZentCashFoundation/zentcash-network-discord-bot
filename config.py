@@ -1,0 +1,2 @@
+BOT_TOKEN = "TOKEN"
+API_URL = "http://146.103.41.135:21698"
